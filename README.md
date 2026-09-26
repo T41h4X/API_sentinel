@@ -6,18 +6,69 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![OpenAPI 3.x](https://img.shields.io/badge/OpenAPI-3.x-green.svg)](https://swagger.io/specification/)
 
-**API Sentinel** (`api-drift-detector`) is an asynchronous FastAPI / ASGI middleware and developer telemetry dashboard that detects real-time contract drifts between runtime API payloads and your OpenAPI specification.
+**API Sentinel** (`api-drift-detector`) is an asynchronous API contract monitoring and schema-drift detection system for FastAPI and ASGI applications. It intercepts runtime traffic, compares request and response payloads against your OpenAPI specification in real-time, surfaces contract violations, aggregates recurring drift statistics, and provides CI/CD contract gating.
+
+```text
+OpenAPI Specification
+        ↓
+Expected API Contract
+        ↓
+   API Sentinel   ←──  Runtime API Traffic (Zero-Latency Async Interception)
+        ↓
+Schema Drift Engine  (Missing fields, Extra fields, Type mismatches, Shadow APIs)
+        ↓
+Persistent History & Interactive Dashboard / CI/CD Gating
+```
 
 ---
 
 ## 🚀 Key Features
 
-- **⚡ Zero-Latency Async Interception**: Uses non-blocking background tasks (`asyncio.create_task`) and request buffering so your API responses stream immediately without waiting for validation.
-- **🔍 Comprehensive Drift Detection**: Detects missing required fields, undocumented query/path parameters, type mismatches, undocumented HTTP status codes, and extra fields.
-- **📊 Real-Time Developer Dashboard**: Built-in interactive dashboard with live polling, KPI metrics, pass/fail rate timeline charts, and severity breakdowns.
-- **💾 Database Persistence**: Automatically records validation history and schema diffs to SQLite via SQLAlchemy (`aiosqlite`), persisting telemetry across server restarts.
-- **🪄 OpenAPI Specification Wizard**: Visual form-based generator to design, preview, test, and save OpenAPI specs directly from the browser.
-- **💻 CLI Tooling**: Built-in `api-drift-detector` (and `api-sentinel`) command-line interface to launch dashboards and validate specifications.
+1. **⚡ Zero-Latency Async Interception**
+   * Uses non-blocking background tasks (`asyncio.create_task`) and response stream buffering. API requests and responses stream immediately to clients without waiting for contract validation.
+
+2. **🔍 Comprehensive Schema Drift Engine**
+   * Detects missing required fields, undocumented extra fields, data type mismatches, enum violations, array item violations, and undocumented query/path parameters.
+   * Detects **Shadow APIs** (runtime endpoints invoked in production that are missing from the OpenAPI documentation).
+   * Detects **Undocumented Status Codes** (e.g. server returning uncontracted 400 or 500 error envelopes).
+
+3. **🔒 Sensitive Data Masking**
+   * Automatically redacts sensitive fields (passwords, tokens, API keys, secrets, authorization headers, private keys, credit cards) across request/response headers, query parameters, and deeply nested JSON bodies before persistence or display.
+
+4. **🧬 Dynamic Multi-Payload Schema Inference**
+   * Inactive or evolving APIs can be inferred dynamically on the fly.
+   * Merges multiple observed payloads to infer unified JSON schemas with type unions (`string | null`), optional fields, and per-path field observation frequency rates.
+
+5. **📋 OpenAPI Specification Validation**
+   * Built-in validator verifying syntax, OpenAPI versions (`3.0.x`, `3.1.x`), path templates, route compilation, and schema definitions.
+   * Usable via CLI (`api-sentinel validate`) and programmatic Python imports.
+
+6. **📈 Recurring Schema Drift History & Aggregation**
+   * Tracks cumulative occurrence counts, first-seen timestamps, last-seen timestamps, and representative sample payloads for recurring drifts.
+   * Dedicated API endpoint `/api/drift/stats` and recurring drift widget on the dashboard.
+
+7. **🧭 Unified Endpoint Explorer**
+   * Merges your OpenAPI specification catalog with live runtime traffic telemetry.
+   * Filter between:
+     * **All Endpoints**
+     * **Documented & Observed**
+     * **Spec Only (Unseen)**: Endpoints documented in spec with 0 traffic calls.
+     * **Undocumented Traffic**: Shadow APIs receiving traffic without spec documentation.
+   * Search, method filtering, and side-by-side spec vs. runtime inferred schema detail view.
+
+8. **🤖 CI/CD Contract Check CLI**
+   * Dedicated command `api-sentinel check --spec openapi.yaml --traffic <file>` to validate API contracts in automated deployment pipelines.
+   * Returns exit code `0` on success and non-zero exit code `1` when violations breach policy (`--fail-on error`, `--fail-on warning`, `--fail-on drift`).
+   * Includes ready-to-use GitHub Actions workflow (`.github/workflows/ci.yml`).
+
+9. **📊 Real-Time Developer Dashboard**
+   * Modern dark-mode interface with live metrics, pass/fail timeline charts, recent validation logs, and JSON/HTML export capabilities.
+
+10. **💾 Database Persistence**
+    * Automatically records all validation results, schema diffs, and recurring drift records to SQLite via SQLAlchemy (`aiosqlite`), persisting telemetry across server restarts.
+
+11. **🪄 OpenAPI Specification Wizard**
+    * Visual browser-based interface to design, edit, preview, test, and save OpenAPI specifications without touching raw YAML.
 
 ---
 
@@ -28,7 +79,7 @@
 pip install api-drift-detector
 ```
 
-### From GitHub (Latest source):
+### From GitHub:
 ```bash
 pip install git+https://github.com/T41h4X/API_sentinel.git
 ```
@@ -37,108 +88,114 @@ pip install git+https://github.com/T41h4X/API_sentinel.git
 
 ## ⚡ Quick Start
 
-### 1. Launch the Sentinel Dashboard (Terminal 1)
-
-Start the monitoring dashboard on port `8001`:
-
+### 1. Start the Sentinel Dashboard (Terminal 1)
 ```bash
-api-drift-detector dashboard
+api-sentinel dashboard
 ```
-*(or use `api-sentinel dashboard`)*
+Open **[http://127.0.0.1:8001](http://127.0.0.1:8001)** to monitor incoming traffic and contract drifts.
 
-Open your browser at **[http://127.0.0.1:8001](http://127.0.0.1:8001)** to monitor incoming traffic, validation results, and contract drifts in real time.
-
----
-
-### 2. Integrate Middleware in Your FastAPI App (Terminal 2)
-
-Add `APISentinelMiddleware` to your FastAPI application:
-
+### 2. Attach Middleware to Your FastAPI App (Terminal 2)
 ```python
 from fastapi import FastAPI
 from api_sentinel import APISentinelMiddleware
 
-app = FastAPI(title="My API")
+app = FastAPI(title="My Service")
 
 # Register Sentinel Middleware
 app.add_middleware(
     APISentinelMiddleware,
     openapi_path="openapi.yaml",            # Path to your OpenAPI spec
-    dashboard_url="http://127.0.0.1:8001",  # URL of the Sentinel dashboard
+    dashboard_url="http://127.0.0.1:8001",  # Dashboard address
     enabled=True,
     print_clean=True,
 )
 
 @app.get("/api/v1/users/{user_id}")
 async def get_user(user_id: int):
-    # Any schema mismatch or extra undocumented fields will trigger live alerts!
+    # Any schema mismatch or undocumented fields will trigger live alerts!
     return {"id": user_id, "name": "Alice"}
 ```
 
-Run your FastAPI server on port `8000`:
+Run your FastAPI application:
 ```bash
 uvicorn app:app --reload --port 8000
 ```
 
-Any request sent to your FastAPI server (`http://127.0.0.1:8000/api/v1/users/1`) is intercepted, checked against `openapi.yaml`, and streamed directly into your dashboard!
+Any request sent to `http://127.0.0.1:8000/api/v1/users/42` is validated asynchronously and streamed directly into your dashboard.
 
 ---
 
 ## 💻 Command Line Interface (CLI)
 
-The package provides the `api-drift-detector` (and `api-sentinel`) CLI:
+The CLI is available as both `api-sentinel` and `api-drift-detector`:
 
 ```bash
-# Start the monitoring dashboard (default: http://127.0.0.1:8001)
-api-drift-detector dashboard
+# 1. Start the interactive dashboard
+api-sentinel dashboard --host 127.0.0.1 --port 8001
 
-# Start on custom host or port
-api-drift-detector dashboard --host 0.0.0.0 --port 8080
+# 2. Validate OpenAPI specification syntax and structure
+api-sentinel validate --spec openapi.yaml
 
-# Start dashboard in development mode with auto-reload
-api-drift-detector dashboard --reload
+# 3. Run CI/CD contract check (spec check)
+api-sentinel check --spec openapi.yaml
 
-# Validate an OpenAPI specification file in CI/CD pipelines
-api-drift-detector validate --spec openapi.yaml
+# 4. Run CI/CD contract check against captured traffic payloads
+api-sentinel check --spec openapi.yaml --traffic traffic.json --fail-on error
 
-# Check installed version
-api-drift-detector version
+# 5. Output contract check results in JSON format
+api-sentinel check --spec openapi.yaml --json
+
+# 6. Check installed version
+api-sentinel version
+```
+
+---
+
+## 🤖 CI/CD Integration (GitHub Actions)
+
+Add this workflow to your repository (`.github/workflows/ci.yml`):
+
+```yaml
+name: API Sentinel Contract Check
+
+on: [push, pull_request]
+
+jobs:
+  contract-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install api-drift-detector
+      - name: Validate OpenAPI Contract
+        run: api-sentinel validate --spec openapi.yaml
+      - name: Check Contract Violations
+        run: api-sentinel check --spec openapi.yaml --fail-on error
 ```
 
 ---
 
 ## ⚙️ Configuration
 
-API Sentinel can be configured using environment variables (prefixed with `SENTINEL_`) or a `.env` file:
+Configure API Sentinel via environment variables (prefixed with `SENTINEL_`) or a `.env` file:
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `SENTINEL_DATABASE_URL` | `sqlite+aiosqlite:///./sentinel.db` | SQLAlchemy database connection string |
-| `SENTINEL_RETENTION_DAYS` | `30` | Number of days to retain validation records before cleanup |
-| `SENTINEL_MASKED_FIELDS` | `["password", "token", "credit_card", "authorization"]` | Sensitive payload fields automatically masked |
+| `SENTINEL_DATABASE_URL` | `sqlite+aiosqlite:///./sentinel.db` | SQLAlchemy SQLite database connection string |
+| `SENTINEL_RETENTION_DAYS` | `30` | Days to retain validation records before automated cleanup |
+| `SENTINEL_MASKED_FIELDS` | `["password", "token", "credit_card", "authorization", "secret", "api_key", "apikey", "access_token", "private_key"]` | Fields masked as `[REDACTED]` |
 | `SENTINEL_SELECTIVE_PERSISTENCE` | `false` | When `true`, only saves `WARNING` and `FAILED` validation results |
 | `SENTINEL_OPENAPI_SPEC_PATH` | `openapi.yaml` | Default OpenAPI specification file path |
 
 ---
 
-## 🧪 Running the Demo Locally
+## 🧪 Testing
 
-Clone the repository and test the full demo application with sample drifts:
-
+Run the full automated test suite:
 ```bash
-git clone https://github.com/T41h4X/API_sentinel.git
-cd API_sentinel
-
-# Create and activate environment
-python -m venv .venv
-.\.venv\Scripts\activate      # Windows
-source .venv/bin/activate    # Linux / macOS
-
-# Install package
-pip install -e .
-
-# Launch all demo services (Windows)
-start_all.cmd
+pytest -v
 ```
 
 ---

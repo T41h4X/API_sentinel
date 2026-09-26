@@ -1,171 +1,185 @@
-# How to Run API Sentinel
+# API Sentinel — How to Run & Complete Demo Guide 🛡️
+
+This guide covers everything you need to run, test, and demonstrate the full capabilities of **API Sentinel** (`api-drift-detector`).
 
 ---
 
-## Prerequisites
-- Python 3.10+ installed
-- Terminal / Command Prompt
+## 📋 Prerequisites
+- **Python 3.10+** (Tested on Python 3.10, 3.11, 3.12, 3.13)
+- Windows Command Prompt or PowerShell (or bash on Linux/macOS)
 
 ---
 
-## Method 1: Quick Start (Recommended for Windows)
+## ⚡ Method 1: Quick Start (Recommended for Windows)
 
-### 1. One-Time Setup (if `.venv` is not created yet)
-Open Command Prompt / PowerShell in the project directory:
-```bash
+The easiest way to start everything and see live results:
+
+### 1. One-Time Setup (Virtual Environment)
+In your terminal, inside the project folder:
+```powershell
 python -m venv .venv
-.\.venv\Scripts\pip install -e .
+.\.venv\Scripts\Activate.ps1
+pip install -e .
 ```
 
-### 2. Start Everything & Launch Demo
-Double-click or run the batch script:
+### 2. Start Everything in One Click
+Double-click or run:
 ```cmd
 start_all.cmd
 ```
-*This automatically starts the API server, starts the Dashboard, injects validation issues, and opens your web browser.*
+*What this does automatically:*
+1. Starts the Monitored API server on **`http://127.0.0.1:8000`**
+2. Starts the Interactive Dashboard on **`http://127.0.0.1:8001`**
+3. Runs validation scenarios and pushes live drift issues to the dashboard
+4. Launches your default web browser to the dashboard
 
-### 3. Generate / Push Issues Again (During Demo)
-To simulate live traffic and force schema validations, run:
+### 3. Generate New Drift Issues During Live Demo
+To trigger additional validation scenarios and increase recurring drift counts:
 ```cmd
 push_issues.cmd
 ```
+*(or run `python push_to_dashboard.py`)*
 
-### 4. Stop All Services
-When you are done testing, you can cleanly stop all background servers by running:
+### 4. Stop All Services Cleanly
+When you finish testing or demonstrating:
 ```cmd
 stop_all.cmd
 ```
 
 ---
 
-## Method 2: Manual Terminal Commands
+## 💻 Method 2: Manual Step-by-Step Terminal Execution
 
-### Step 1: Environment Setup
-```bash
-# Create and activate virtual environment
-python -m venv .venv
+If you prefer running services in separate terminal windows:
 
-# Windows:
-.\.venv\Scripts\activate
-# Linux/macOS:
-source .venv/bin/activate
-
-# Install all dependencies (FastAPI, SQLAlchemy, etc.)
-pip install -e .
-```
-
-### Step 2: Start Demo API (Terminal 1)
-```bash
-uvicorn example_app:app --reload --host 127.0.0.1 --port 8000
-```
-
-### Step 3: Start Dashboard (Terminal 2)
-```bash
+### Terminal 1: Start the Interactive Dashboard
+```powershell
+.\.venv\Scripts\Activate.ps1
 uvicorn dashboard.app:app --reload --host 127.0.0.1 --port 8001
 ```
+* Dashboard will be live at: **[http://127.0.0.1:8001](http://127.0.0.1:8001)**
 
-### Step 4: Run Validation & Push Issues (Terminal 3)
-```bash
+### Terminal 2: Start the Monitored Demo API
+```powershell
+.\.venv\Scripts\Activate.ps1
+uvicorn example_app:app --reload --host 127.0.0.1 --port 8000
+```
+* API Swagger UI will be live at: **[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)**
+
+### Terminal 3: Inject Live Traffic & Validation Scenarios
+```powershell
+.\.venv\Scripts\Activate.ps1
 python push_to_dashboard.py
 ```
 
-### Step 4 (Alternative): Test Manually with PowerShell
-If you prefer to manually generate live traffic instead of using the python script, run these commands in PowerShell:
+---
 
-**Trigger a WARNING Drift (Extra Field):**
-```powershell
-Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8000/api/v1/users/42"
-```
+## 🎬 How to Demonstrate the Whole Project (Faculty / Team Walkthrough)
 
-**Trigger an ERROR Drift (Missing Required Field):**
-```powershell
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/v1/auth/login" -Headers @{"Content-Type"="application/json"} -Body '{"username": "alice", "password": "secret"}'
-```
+Follow these 7 steps to showcase all major features of API Sentinel:
 
-**Trigger a CLEAN Request (Passed):**
-```powershell
-Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8000/api/v1/users"
-```
+### Step 1: The Contract Foundation (OpenAPI Specification)
+1. Open the Monitored API Swagger UI: **[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)**
+2. Explain: The API is expected to strictly conform to `openapi.yaml`.
+3. In terminal, demonstrate the built-in specification validator:
+   ```powershell
+   api-sentinel validate --spec openapi.yaml
+   ```
+   *Show that it parses routes, schemas, and verifies valid OpenAPI 3.0.x / 3.1.x syntax.*
 
 ---
 
-## Where to Find Everything
-
-### 1. The Dashboard (Visual Interface)
-Once the `dashboard.app` server is running, open your web browser and go to:
-👉 **[http://127.0.0.1:8001](http://127.0.0.1:8001)**
-Here you will see the real-time API monitoring interface, endpoint health, and schema validation errors.
-
-### 2. The Monitored API (Swagger UI)
-To see the actual endpoints that API Sentinel is monitoring, go to:
-👉 **[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)**
-This is the standard FastAPI Swagger interface for the dummy application.
-
-### 3. The Database (Persistent Storage)
-API Sentinel automatically saves all reports and schema drifts to a local SQLite database, meaning your data won't be lost when you restart the servers!
-- **Database File:** Look for a file named `sentinel.db` in the root folder of this project (`g:\Projects\API_sentinel\sentinel.db`).
-- **How to view it:** You can open this file using any free SQLite viewer (like [DB Browser for SQLite](https://sqlitebrowser.org/) or [DBeaver](https://dbeaver.io/)). 
-- **Tables inside:** 
-  - `validation_reports`: Contains the HTTP methods, status codes, and the masked request/response JSON payloads.
-  - `differences`: Contains specific error messages and schema drifts linked to each report.
+### Step 2: The Monitoring Dashboard
+1. Open the Dashboard: **[http://127.0.0.1:8001](http://127.0.0.1:8001)**
+2. Point out:
+   - **KPI Summary Cards**: Total Analyzed Requests, Passed, Warnings, and Failed.
+   - **Compliance Pass Rate**: Real-time percentage of contract adherence.
+   - **Recent Validation Reports Table**: Live logs of every intercepted request/response cycle.
 
 ---
 
-## Presentation / Demo Steps for Faculty
-
-1. **Open Swagger UI:** Go to [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) to show the monitored API endpoints and OpenAPI schema.
-2. **Open Dashboard:** Go to [http://127.0.0.1:8001](http://127.0.0.1:8001) to present the real-time API monitoring interface.
-3. **Trigger Validation Issues:** Run `push_issues.cmd` or `python push_to_dashboard.py`.
-4. **Show Live Results:** Refresh the Dashboard to showcase:
-   - Request & response schema validation errors
-   - Performance & latency metrics
-   - Detailed issue breakdowns and logs
-5. **Show Database Persistence:** 
-   - Close the dashboard server (`Ctrl + C` or `stop_all.cmd`).
-   - Open `sentinel.db` in *DB Browser for SQLite* to prove the logs were permanently saved (and show that sensitive fields like "password" are `***MASKED***`).
-   - Restart the dashboard to prove the historical data instantly reappears.
-6. **Stop Services:** Run `stop_all.cmd` or press `Ctrl + C` in the terminals.
+### Step 3: Trigger Live Schema Drift Scenarios
+Run:
+```powershell
+python push_to_dashboard.py
+```
+Explain the scenarios being executed against the contract:
+- **Scenario 1 (HTTP 200 — PASSED)**: Clean response matching the `UserResponse` schema 100%.
+- **Scenario 2 (HTTP 200 — WARNING)**: Server returned undocumented extra fields `debug_internal_id` and `server_uptime` (`EXTRA_FIELD`).
+- **Scenario 3 (HTTP 201 — FAILED)**: Server returned `201 Created`, but omitted the mandatory `email` field (`REQUIRED_FIELD_VIOLATION`). *Highlight that this catches silent production bugs where the HTTP code is 201 but clients crash.*
+- **Scenario 4 (HTTP 201 — FAILED)**: Field `name` was returned as an integer instead of a string (`TYPE_MISMATCH`).
+- **Scenario 5 (HTTP 400 — FAILED)**: Server returned an undocumented `400 Bad Request` status code (`UNDOCUMENTED_STATUS_CODE`).
+- **Scenario 6 (HTTP 201 — FAILED)**: Traffic sent to `/api/v1/orders` which is completely missing from the specification (`UNDOCUMENTED_ENDPOINT` / Shadow API detection).
 
 ---
 
-## How to Add and Monitor a New Endpoint
+### Step 4: Recurring Schema Drift History & Statistics
+1. Scroll down to the **"Recurring Schema Drift History"** table on the dashboard home page.
+2. Demonstrate:
+   - Cumulative **Occurrence Count** for recurring drifts (e.g. `debug_internal_id` observed 3+ times).
+   - **First Seen** and **Last Seen** timestamps tracking drift duration.
+   - Severity badges (`WARNING` vs `ERROR`) and exact JSON locations.
 
-Because the `APISentinelMiddleware` is attached globally in `example_app.py`, any new API endpoint you create is instantly monitored in real-time. No extra configuration is needed for the Python code!
+---
 
-### Step 1: Add the Code (`example_app.py`)
-Create your new route just like any normal FastAPI endpoint:
-```python
-@app.get("/api/v1/orders", tags=["orders"])
-async def get_orders():
-    # Because of the middleware, this is automatically monitored!
-    return JSONResponse(content={"order_id": 123, "status": "shipped"})
+### Step 5: Unified Endpoint Explorer
+1. Click **"Endpoint Explorer"** in the sidebar navigation or visit:
+   👉 **[http://127.0.0.1:8001/endpoints](http://127.0.0.1:8001/endpoints)**
+2. Demonstrate:
+   - **Filter Tabs**:
+     - *All*: Complete catalog of documented and runtime endpoints.
+     - *Documented & Observed*: Active endpoints matching spec.
+     - *Spec Only (Unseen)*: Documented endpoints with 0 runtime traffic (`POST /api/v1/auth/login`).
+     - *Undocumented Traffic*: Shadow endpoints detected live without spec entry (`POST /api/v1/orders`).
+   - **Client-side Search**: Type `users` or `orders` into the search box to filter instantly.
+   - Click **"View Spec & Telemetry"** on any endpoint to compare expected schema vs runtime inferred schema.
+
+---
+
+### Step 6: Sensitive Data Masking
+1. Explain that API Sentinel automatically redacts sensitive data before persisting or displaying logs.
+2. In the dashboard reports, show that values for fields like `password`, `token`, `secret`, `api_key`, and `access_token` are masked as `[REDACTED]` or `***MASKED***`.
+
+---
+
+### Step 7: CI/CD Pipeline Contract Verification
+Demonstrate how API Sentinel runs in automated GitHub Actions / CI/CD pipelines to prevent broken deployments:
+
+1. **Verify spec in CI**:
+   ```powershell
+   api-sentinel check --spec openapi.yaml
+   ```
+   *Exits with code 0 on success.*
+
+2. **Verify JSON Output mode**:
+   ```powershell
+   api-sentinel check --spec openapi.yaml --json
+   ```
+
+3. **Check Exit Code**:
+   ```powershell
+   $LASTEXITCODE
+   ```
+   *Returns `0` for clean pass, or `1` if contract violations breach policy (`--fail-on error` or `--fail-on warning`).*
+
+4. Show `.github/workflows/ci.yml` in your repository as proof of automated CI validation.
+
+---
+
+## 🗄️ Database & Persistence Verification
+- **Database File**: `sentinel.db` (SQLite in project root).
+- **Persistence Test**:
+  1. Note the numbers on the dashboard.
+  2. Stop the dashboard (`Ctrl + C`).
+  3. Restart it with `uvicorn dashboard.app:app --port 8001`.
+  4. Notice all historical reports and recurring drift stats are preserved.
+- **Inspect DB**: You can open `sentinel.db` in any SQLite viewer (DB Browser for SQLite, DBeaver, or VS Code SQLite extension) to inspect `validation_reports`, `differences`, and `aggregated_drifts`.
+
+---
+
+## 🧪 Running the Full Automated Test Suite
+To verify code correctness across all components:
+```powershell
+pytest -v
 ```
-
-### Step 2: Add the Schema (`openapi.yaml`)
-API Sentinel needs to know what the "correct" data should look like. Document this new endpoint in `openapi.yaml`:
-```yaml
-paths:
-  /api/v1/orders:
-    get:
-      summary: Get list of orders
-      responses:
-        '200':
-          description: A list of orders
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [order_id, status]
-                properties:
-                  order_id:
-                    type: integer
-                  status:
-                    type: string
-```
-
-### Step 3: Test It
-1. Use Postman, your browser, or PowerShell (`Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8000/api/v1/orders"`) to trigger the new API.
-2. The middleware will intercept the response (`{"order_id": 123, "status": "shipped"}`) and compare it against the YAML.
-3. Refresh the Dashboard! 
-   - If they match, it passes (or is ignored if selective persistence is on).
-   - If you later modify the Python code to return `{"tracking_number": "XYZ"}`, the dashboard will immediately alert you with an `EXTRA_FIELD` drift warning!
+All **165 tests** across middleware, schema inferencer, diff engine, spec validator, and CLI should pass.

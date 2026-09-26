@@ -2,7 +2,7 @@
 API Sentinel - Real-time OpenAPI Schema Drift Detection & Runtime Schema Generator
 """
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 from api_sentinel.diff_engine import (
     APIDiffEngine,
