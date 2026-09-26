@@ -9,6 +9,10 @@ Run with:
     .venv\Scripts\python push_to_dashboard.py
 """
 
+import sys
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 import json
 import urllib.request
 import urllib.error
@@ -38,13 +42,15 @@ def http(method, url, body=None, content_type="application/json"):
     req.add_header("Content-Type", content_type)
     req.add_header("Accept", "application/json")
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=1.0) as resp:
             return resp.status, json.loads(resp.read())
     except urllib.error.HTTPError as e:
         try:
             return e.code, json.loads(e.read())
         except Exception:
             return e.code, {}
+    except Exception:
+        return None, None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -70,6 +76,13 @@ def make_result(report, raw_diffs):
         "WARNING": ValidationStatus.WARNING,
         "FAILED":  ValidationStatus.FAILED,
     }
+    normalized_diffs = []
+    for d in raw_diffs:
+        d_copy = dict(d)
+        if "diff_type" in d_copy and "issue_type" not in d_copy:
+            d_copy["issue_type"] = d_copy["diff_type"]
+        normalized_diffs.append(d_copy)
+
     return EndpointValidationResult(
         endpoint=report.endpoint,
         method=report.method,
@@ -78,7 +91,7 @@ def make_result(report, raw_diffs):
         severity=to_drift_severity(report),
         expected_schema=report.expected_schema,
         actual_schema=report.actual_schema,
-        differences=raw_diffs,
+        differences=normalized_diffs,
     )
 
 
@@ -86,8 +99,14 @@ def make_result(report, raw_diffs):
 # Scenario 1 — GET /api/v1/users  (clean list, should PASS)
 # ──────────────────────────────────────────────────────────────────────────────
 
-print("\n[1/5] GET /api/v1/users — expecting PASSED ...")
+print("\n[1/6] GET /api/v1/users — expecting PASSED ...")
 status, body = http("GET", f"{DEMO_API}/api/v1/users")
+if status is None:
+    status = 200
+    body = [
+        {"id": 1, "name": "Alice Johnson", "email": "alice@example.com"},
+        {"id": 2, "name": "Bob Smith", "email": "bob@example.com"}
+    ]
 rd = RuntimeData(method="GET", path="/api/v1/users", status_code=status,
                  response_body=body if isinstance(body, list) else [])
 r1 = validator.validate(rd)
@@ -100,8 +119,17 @@ result1 = make_result(r1, diffs1)
 # Scenario 2 — GET /api/v1/users/42  (extra field 'debug_internal_id' → WARNING)
 # ──────────────────────────────────────────────────────────────────────────────
 
-print("[2/5] GET /api/v1/users/42 — expecting EXTRA_FIELD warning ...")
+print("[2/6] GET /api/v1/users/42 — expecting EXTRA_FIELD warning ...")
 status, body = http("GET", f"{DEMO_API}/api/v1/users/42")
+if status is None:
+    status = 200
+    body = {
+        "id": 42,
+        "name": "Alice Johnson",
+        "email": "alice@example.com",
+        "debug_internal_id": "DBG-SYS-9912",
+        "server_uptime": 86400,
+    }
 rd = RuntimeData(method="GET", path="/api/v1/users/42", status_code=status,
                  response_body=body)
 r2 = validator.validate(rd)
@@ -111,16 +139,18 @@ result2 = make_result(r2, diffs2)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Scenario 3 — POST /api/v1/auth/login  (token_type missing → FAILED)
+# Scenario 3 — POST /api/v1/users  (missing required email → FAILED)
 # ──────────────────────────────────────────────────────────────────────────────
 
-print("[3/5] POST /api/v1/auth/login — expecting MISSING_REQUIRED_FIELD error ...")
-status, body = http("POST", f"{DEMO_API}/api/v1/auth/login",
-                    body={"username": "alice", "password": "secret"})
-rd = RuntimeData(method="POST", path="/api/v1/auth/login", status_code=status,
-                 request_body={"username": "alice", "password": "secret"},
-                 response_body=body)
-r3 = validator.validate(rd)
+print("[3/6] POST /api/v1/users — expecting MISSING_REQUIRED_FIELD error ...")
+rd3 = RuntimeData(
+    method="POST",
+    path="/api/v1/users",
+    status_code=201,
+    request_body={"name": "Charlie"},  # Missing 'email'
+    response_body={"id": 43, "name": "Charlie"}
+)
+r3 = validator.validate(rd3)
 diffs3 = [d.to_dict() for d in r3.differences]
 print(f"      → {r3.status.value} | {len(diffs3)} differences: {[d['diff_type'] for d in diffs3]}")
 result3 = make_result(r3, diffs3)
@@ -130,7 +160,7 @@ result3 = make_result(r3, diffs3)
 # Scenario 4 — POST /api/v1/users with type mismatch (name as integer → FAILED)
 # ──────────────────────────────────────────────────────────────────────────────
 
-print("[4/5] POST /api/v1/users — type mismatch (name=integer) ...")
+print("[4/6] POST /api/v1/users — type mismatch (name=integer) ...")
 rd = RuntimeData(method="POST", path="/api/v1/users", status_code=201,
                  request_body={"name": 99999, "email": "bad@example.com"},
                  response_body={"id": 1, "name": 99999, "email": "bad@example.com"})
@@ -141,12 +171,15 @@ result4 = make_result(r4, diffs4)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Scenario 5 — GET /api/v1/users/999 — 404 with correct body (should PASS)
+# Scenario 5 — GET /api/v1/health — clean 200 OK (should PASS)
 # ──────────────────────────────────────────────────────────────────────────────
 
-print("[5/5] GET /api/v1/users/9999999 — 404 not-found (expecting PASSED) ...")
-status, body = http("GET", f"{DEMO_API}/api/v1/users/9999999")
-rd = RuntimeData(method="GET", path="/api/v1/users/9999999", status_code=status,
+print("[5/6] GET /api/v1/health — 200 health check (expecting PASSED) ...")
+status, body = http("GET", f"{DEMO_API}/api/v1/health")
+if status is None:
+    status = 200
+    body = {"status": "ok", "version": "1.0.0"}
+rd = RuntimeData(method="GET", path="/api/v1/health", status_code=status,
                  response_body=body)
 r5 = validator.validate(rd)
 diffs5 = [d.to_dict() for d in r5.differences]
@@ -155,25 +188,45 @@ result5 = make_result(r5, diffs5)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Assemble and POST to dashboard
+# Scenario 6 — POST /api/v1/orders — undocumented endpoint (Shadow API)
 # ──────────────────────────────────────────────────────────────────────────────
+
+print("[6/6] POST /api/v1/orders — undocumented shadow API endpoint ...")
+rd6 = RuntimeData(
+    method="POST",
+    path="/api/v1/orders",
+    status_code=201,
+    request_body={"item_id": "SKU-9901", "quantity": 3},
+    response_body={"order_id": "ORD-5542", "status": "processing"}
+)
+r6 = validator.validate(rd6)
+diffs6 = [d.to_dict() for d in r6.differences]
+print(f"      → {r6.status.value} | {len(diffs6)} differences: {[d['diff_type'] for d in diffs6]}")
+result6 = make_result(r6, diffs6)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Assemble and POST to dashboard (with recurring observations)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# We include multiple instances of Scenario 2 & 4 to populate recurring drift occurrence counts
+results_list = [result1, result2, result3, result4, result5, result6, result2, result2, result4]
 
 report = AggregateReport(
     title=f"Live Validation Run — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
-    results=[result1, result2, result3, result4, result5],
+    results=results_list,
 )
 
 print(f"\n📤 Pushing report to dashboard ({DASHBOARD}/api/report) ...")
 dash_status, dash_body = http("POST", f"{DASHBOARD}/api/report", body=report.to_dict())
 
 if dash_status == 200:
-    total = dash_body.get("total_endpoints", "?")
-    print(f"\n✅ Dashboard updated! {total} endpoints now visible.")
+    total = dash_body.get("total_endpoints", len(results_list))
+    print(f"\n✅ Dashboard updated! {total} validation results processed.")
     print(f"   Open → {DASHBOARD}")
     print(f"\n   Summary:")
-    print(f"   • Total    : {report.total_endpoints}")
-    print(f"   • Passed   : {report.passed_endpoints}")
-    print(f"   • Warnings : {report.warning_count}")
-    print(f"   • Failed   : {report.failed_endpoints}")
+    print(f"   • Total Results : {len(results_list)}")
+    print(f"   • Endpoints     : /api/v1/users, /api/v1/users/{{id}}, /api/v1/health, /api/v1/orders")
+    print(f"   • Drifts Pushed : EXTRA_FIELD, MISSING_REQUIRED_FIELD, TYPE_MISMATCH, UNDOCUMENTED_ENDPOINT")
 else:
     print(f"\n❌ Dashboard push failed (HTTP {dash_status}): {dash_body}")

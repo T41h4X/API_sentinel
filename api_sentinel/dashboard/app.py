@@ -447,8 +447,11 @@ async def append_report_result(data: dict):
                 actual_schema=data.get("actual_schema"),
             )
             for diff in data.get("differences", []):
+                diff_issue_type = diff.get("issue_type") or diff.get("diff_type")
+                if hasattr(diff_issue_type, "value"):
+                    diff_issue_type = diff_issue_type.value
                 record.differences.append(DifferenceRecord(
-                    issue_type=diff.get("issue_type"),
+                    issue_type=diff_issue_type,
                     severity=diff.get("severity"),
                     location=diff.get("location"),
                     message=diff.get("message"),
@@ -460,10 +463,14 @@ async def append_report_result(data: dict):
 
             # Update aggregated drift history & statistics
             for diff in data.get("differences", []):
-                issue_type = diff.get("issue_type") or "DRIFT"
+                issue_type = diff.get("issue_type") or diff.get("diff_type") or "DRIFT"
+                if hasattr(issue_type, "value"):
+                    issue_type = issue_type.value
                 loc = diff.get("location") or "response_body"
                 msg = diff.get("message") or ""
                 sev = diff.get("severity") or "WARNING"
+                if hasattr(sev, "value"):
+                    sev = sev.value
                 exp = str(diff.get("expected")) if diff.get("expected") is not None else None
                 act = str(diff.get("actual")) if diff.get("actual") is not None else None
 
@@ -510,6 +517,24 @@ async def append_report_result(data: dict):
         return {"status": "success"}
     except Exception as exc:
         return JSONResponse(status_code=400, content={"status": "error", "message": str(exc)})
+
+
+@app.post("/api/report")
+async def receive_aggregate_report(data: dict):
+    """Receives a batch AggregateReport or single result dictionary and persists it."""
+    results = data.get("results", [])
+    if not results and "endpoint" in data:
+        results = [data]
+    count = 0
+    for r in results:
+        res = await append_report_result(r)
+        if isinstance(res, dict) and res.get("status") == "success":
+            count += 1
+    return {
+        "status": "success",
+        "results_processed": count,
+        "total_endpoints": len(results),
+    }
 
 
 @app.post("/api/report/clear")
