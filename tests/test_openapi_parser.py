@@ -169,3 +169,34 @@ class TestOpenAPIParser:
         }
         parser = OpenAPIParser.from_dict(spec_data)
         assert parser.match_route("/test") == "/test"
+
+
+class TestSpecValidator:
+    """Tests for the standalone OpenAPI specification validator."""
+
+    def test_validate_empty_string(self):
+        from api_sentinel.spec_validator import validate_openapi_spec
+        res = validate_openapi_spec("")
+        assert not res.is_valid
+        assert "cannot be empty" in res.error
+
+    def test_validate_invalid_yaml(self):
+        from api_sentinel.spec_validator import validate_openapi_spec
+        res = validate_openapi_spec("openapi: 3.0.3\npaths: [unclosed")
+        assert not res.is_valid
+        assert "Invalid YAML/JSON syntax" in res.error
+
+    def test_validate_missing_version(self):
+        from api_sentinel.spec_validator import validate_openapi_spec
+        res = validate_openapi_spec("info: {title: 'Test', version: '1.0'}\npaths: {}")
+        assert not res.is_valid
+        assert "Missing required OpenAPI version" in res.error
+
+    def test_validate_valid_spec(self):
+        from api_sentinel.spec_validator import validate_openapi_spec
+        res = validate_openapi_spec(SPEC_PATH)
+        assert res.is_valid
+        assert res.summary["title"] == "Target API Specification"
+        assert res.summary["paths_count"] > 0
+        assert len(res.summary["endpoints"]) > 0
+

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>API Sentinel - Endpoints Explorer</title>
+<meta name="description" content="Explore documented and runtime API endpoints, contract schemas, and historical drift."/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+          "error": "#ba1a1a",
+          "inverse-surface": "#283044",
+          "surface-container-highest": "#dae2fd",
+          "surface-container-high": "#e2e7ff",
+          "outline-variant": "#c3c6d7",
+          "surface": "#faf8ff",
+          "primary": "#004ac6",
+          "primary-container": "#2563eb",
+          "secondary": "#505f76",
+          "secondary-container": "#d0e1fb",
+          "tertiary": "#943700",
+          "tertiary-container": "#bc4800",
+          "surface-container": "#eaedff",
+          "surface-container-low": "#f2f3ff",
+          "surface-container-lowest": "#ffffff",
+          "on-background": "#131b2e",
+          "on-surface": "#131b2e",
+          "on-surface-variant": "#434655",
+          "error-container": "#ffdad6",
+          "on-error-container": "#93000a",
+          "background": "#faf8ff"
+        },
+        "fontFamily": {
+          "code-md": ["JetBrains Mono"],
+          "body-md": ["Inter"],
+          "headline-md": ["Geist"]
+        }
+      }
+    }
+  }
+</script>
+<style>
+  body { background-color: #faf8ff; color: #131b2e; }
+  .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+  .material-symbols-outlined.fill { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+</style>
+</head>
+<body class="bg-background text-on-background font-body-md h-screen overflow-hidden flex flex-col">
+
+<!-- TopNavBar -->
+<header class="fixed top-0 w-full z-50 flex items-center justify-between px-6 h-16 bg-surface border-b border-outline-variant">
+  <div class="flex items-center gap-3">
+    <span class="material-symbols-outlined text-primary text-2xl">shield</span>
+    <a href="/" class="text-xl font-headline-md font-bold text-primary">API Sentinel</a>
+    <span class="text-xs text-on-surface-variant bg-surface-container px-2 py-0.5 rounded font-code-md">Endpoints Explorer</span>
+  </div>
+  <div class="flex items-center gap-2">
+    <a href="/" class="px-3 py-1.5 border border-outline-variant bg-surface-container text-on-surface hover:bg-surface-variant rounded text-xs font-semibold flex items-center gap-1 transition-colors">
+      <span class="material-symbols-outlined text-sm">dashboard</span> Dashboard
+    </a>
+    <a href="/openapi-docs" class="px-3 py-1.5 border border-outline-variant bg-surface-container text-on-surface hover:bg-surface-variant rounded text-xs font-semibold flex items-center gap-1 transition-colors">
+      <span class="material-symbols-outlined text-sm">menu_book</span> OpenAPI Docs
+    </a>
+  </div>
+</header>
+
+<div class="flex h-full pt-16">
+  <!-- SideNavBar -->
+  <nav class="fixed left-0 top-16 h-[calc(100vh-64px)] w-60 flex flex-col p-4 bg-surface-container border-r border-outline-variant z-40 hidden md:flex">
+    <div class="mb-6">
+      <div class="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">WORKSPACE</div>
+      <div class="text-sm font-semibold text-on-surface">API Sentinel</div>
+    </div>
+    <ul class="flex flex-col gap-2 flex-1">
+      <li>
+        <a class="flex items-center gap-3 p-2 text-on-surface-variant hover:text-on-surface hover:bg-surface-variant rounded-lg transition-all text-sm" href="/">
+          <span class="material-symbols-outlined">dashboard</span>
+          <span>Dashboard</span>
+        </a>
+      </li>
+      <li>
+        <a class="flex items-center gap-3 p-2 bg-secondary-container text-on-secondary-container font-semibold rounded-lg text-sm" href="/endpoints">
+          <span class="material-symbols-outlined fill">explore</span>
+          <span>Endpoints Explorer</span>
+        </a>
+      </li>
+      <li>
+        <a class="flex items-center gap-3 p-2 text-on-surface-variant hover:text-on-surface hover:bg-surface-variant rounded-lg transition-all text-sm" href="/openapi-docs">
+          <span class="material-symbols-outlined">menu_book</span>
+          <span>OpenAPI Docs</span>
+        </a>
+      </li>
+    </ul>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="flex-1 ml-0 md:ml-60 p-6 overflow-y-auto h-[calc(100vh-64px)]">
+    <div class="max-w-[1440px] mx-auto">
+      <header class="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 class="text-2xl font-bold font-headline-md text-on-surface mb-1">Endpoints Explorer</h1>
+          <p class="text-sm text-on-surface-variant">Comprehensive catalog of API endpoints, contract status, and runtime drift telemetry.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="location.reload()" class="px-3 py-1.5 bg-primary text-white rounded text-xs font-semibold flex items-center gap-1 hover:opacity-90">
+            <span class="material-symbols-outlined text-sm">refresh</span> Refresh Catalog
+          </button>
+        </div>
+      </header>
+
+      <!-- KPI Summary Cards -->
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+        <div class="p-4 bg-surface rounded-lg border border-outline-variant shadow-sm">
+          <div class="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Total Endpoints</div>
+          <div class="text-2xl font-bold text-on-surface mt-1" id="stat-total">{{ catalog | length }}</div>
+        </div>
+        <div class="p-4 bg-surface rounded-lg border border-outline-variant shadow-sm">
+          <div class="text-[11px] font-bold text-secondary uppercase tracking-wider">Passing</div>
+          <div class="text-2xl font-bold text-secondary mt-1" id="stat-passing">{{ catalog | selectattr('status', 'equalto', 'PASSED') | list | length }}</div>
+        </div>
+        <div class="p-4 bg-surface rounded-lg border border-outline-variant shadow-sm">
+          <div class="text-[11px] font-bold text-tertiary uppercase tracking-wider">Warnings</div>
+          <div class="text-2xl font-bold text-tertiary mt-1" id="stat-warning">{{ catalog | selectattr('status', 'equalto', 'WARNING') | list | length }}</div>
+        </div>
+        <div class="p-4 bg-surface rounded-lg border border-outline-variant shadow-sm">
+          <div class="text-[11px] font-bold text-error uppercase tracking-wider">Failed / Drifting</div>
+          <div class="text-2xl font-bold text-error mt-1" id="stat-failed">{{ catalog | selectattr('status', 'equalto', 'FAILED') | list | length }}</div>
+        </div>
+        <div class="p-4 bg-surface rounded-lg border border-outline-variant shadow-sm">
+          <div class="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Untested</div>
+          <div class="text-2xl font-bold text-on-surface-variant mt-1" id="stat-untested">{{ catalog | selectattr('status', 'equalto', 'UNTESTED') | list | length }}</div>
+        </div>
+      </div>
+
+      <!-- Filter Controls -->
+      <div class="bg-surface-container border border-outline-variant rounded-lg p-4 mb-6 flex flex-wrap gap-4 items-center justify-between">
+        <div class="flex items-center gap-3 flex-1 min-w-[260px]">
+          <span class="material-symbols-outlined text-on-surface-variant text-lg">search</span>
+          <input id="search-input" type="text" placeholder="Filter by path, method, or summary..." class="w-full bg-surface border border-outline-variant rounded px-3 py-1.5 text-xs text-on-surface focus:outline-none focus:border-primary" />
+        </div>
+        <div class="flex items-center gap-2">
+          <select id="filter-method" class="bg-surface border border-outline-variant rounded px-2.5 py-1.5 text-xs text-on-surface focus:outline-none focus:border-primary">
+            <option value="ALL">All Methods</option>
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+            <option value="DELETE">DELETE</option>
+            <option value="PATCH">PATCH</option>
+          </select>
+          <select id="filter-status" class="bg-surface border border-outline-variant rounded px-2.5 py-1.5 text-xs text-on-surface focus:outline-none focus:border-primary">
+            <option value="ALL">All Statuses</option>
+            <option value="PASSED">PASSED</option>
+            <option value="WARNING">WARNING</option>
+            <option value="FAILED">FAILED</option>
+            <option value="UNTESTED">UNTESTED</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Endpoints Table -->
+      <div class="bg-surface border border-outline-variant rounded-lg shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="text-on-surface-variant text-[11px] font-bold uppercase tracking-wider border-b border-outline-variant bg-surface-container-low">
+                <th class="py-3 px-4 w-24">Method</th>
+                <th class="py-3 px-4">Endpoint Path & Details</th>
+                <th class="py-3 px-4 w-32">Status</th>
+                <th class="py-3 px-4 w-28 text-right">Traffic</th>
+                <th class="py-3 px-4 w-28 text-right">Pass Rate</th>
+                <th class="py-3 px-4 w-40">Last Checked</th>
+                <th class="py-3 px-4 w-24">Action</th>
+              </tr>
+            </thead>
+            <tbody class="text-xs font-code-md divide-y divide-outline-variant/30" id="endpoints-table-body">
+              {% for ep in catalog %}
+              <tr class="endpoint-row hover:bg-surface-container transition-colors"
+                  data-endpoint="{{ ep.endpoint }}"
+                  data-method="{{ ep.method }}"
+                  data-status="{{ ep.status }}"
+                  data-summary="{{ ep.summary }}">
+                <td class="py-3 px-4">
+                  <span class="bg-primary-container text-white px-2 py-0.5 rounded text-[11px] font-bold">{{ ep.method }}</span>
+                </td>
+                <td class="py-3 px-4">
+                  <div class="font-bold text-on-surface">{{ ep.endpoint }}</div>
+                  {% if ep.summary %}
+                  <div class="text-[11px] text-on-surface-variant font-normal font-sans mt-0.5">{{ ep.summary }}</div>
+                  {% endif %}
+                  {% if not ep.is_documented %}
+                  <span class="inline-block bg-tertiary-container/30 text-tertiary text-[10px] px-1.5 py-0.2 rounded mt-0.5 font-sans font-semibold">UNDOCUMENTED</span>
+                  {% endif %}
+                </td>
+                <td class="py-3 px-4">
+                  {% if ep.status == 'PASSED' %}
+                  <span class="bg-secondary-container text-on-secondary-container px-2 py-0.5 rounded font-bold text-[10px] border border-secondary/20">PASS</span>
+                  {% elif ep.status == 'WARNING' %}
+                  <span class="bg-tertiary-container text-on-tertiary-container px-2 py-0.5 rounded font-bold text-[10px] border border-tertiary/20">WARN</span>
+                  {% elif ep.status == 'FAILED' %}
+                  <span class="bg-error-container text-on-error-container px-2 py-0.5 rounded font-bold text-[10px] border border-error/20">FAIL</span>
+                  {% else %}
+                  <span class="bg-surface-container-high text-on-surface-variant px-2 py-0.5 rounded font-bold text-[10px]">UNTESTED</span>
+                  {% endif %}
+                </td>
+                <td class="py-3 px-4 text-right text-on-surface font-bold">{{ ep.total_calls }} calls</td>
+                <td class="py-3 px-4 text-right">
+                  {% if ep.total_calls > 0 %}
+                  <span class="font-bold {% if ep.pass_rate >= 90 %}text-secondary{% elif ep.pass_rate >= 50 %}text-tertiary{% else %}text-error{% endif %}">{{ ep.pass_rate }}%</span>
+                  {% else %}
+                  <span class="text-on-surface-variant">—</span>
+                  {% endif %}
+                </td>
+                <td class="py-3 px-4 text-on-surface-variant text-[11px]">
+                  {{ ep.last_checked.split('T')[0] ~ ' ' ~ ep.last_checked.split('T')[1][:8] if ep.last_checked else 'Never' }}
+                </td>
+                <td class="py-3 px-4">
+                  <a href="/endpoint/explore?method={{ ep.method }}&endpoint={{ ep.endpoint }}" class="text-primary hover:underline font-semibold flex items-center gap-0.5">
+                    Inspect <span class="material-symbols-outlined text-sm">arrow_forward</span>
+                  </a>
+                </td>
+              </tr>
+              {% endfor %}
+              <tr id="empty-results-row" style="display: none;">
+                <td colspan="7" class="text-center py-8 text-on-surface-variant font-sans">
+                  No API endpoints match the selected criteria.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script>
+  // Client-side search and filtering
+  const searchInput = document.getElementById('search-input');
+  const methodFilter = document.getElementById('filter-method');
+  const statusFilter = document.getElementById('filter-status');
+  const rows = document.querySelectorAll('.endpoint-row');
+  const emptyRow = document.getElementById('empty-results-row');
+
+  function applyFilters() {
+    const q = (searchInput.value || '').toLowerCase().trim();
+    const method = methodFilter.value;
+    const status = statusFilter.value;
+    let visibleCount = 0;
+
+    rows.forEach(row => {
+      const ep = (row.dataset.endpoint || '').toLowerCase();
+      const m = row.dataset.method;
+      const s = row.dataset.status;
+      const desc = (row.dataset.summary || '').toLowerCase();
+
+      const matchSearch = !q || ep.includes(q) || desc.includes(q) || m.toLowerCase().includes(q);
+      const matchMethod = method === 'ALL' || m === method;
+      const matchStatus = status === 'ALL' || s === status;
+
+      if (matchSearch && matchMethod && matchStatus) {
+        row.style.display = '';
+        visibleCount++;
+      } else {
+        row.style.display = 'none';
+      }
+    });
+
+    emptyRow.style.display = visibleCount === 0 ? '' : 'none';
+  }
+
+  searchInput.addEventListener('input', applyFilters);
+  methodFilter.addEventListener('change', applyFilters);
+  statusFilter.addEventListener('change', applyFilters);
+</script>
+</body>
+</html>

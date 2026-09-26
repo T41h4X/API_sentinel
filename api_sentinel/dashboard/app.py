@@ -6,6 +6,7 @@ FastAPI web application for visualizing ValidationReport objects, endpoint statu
 import json
 import os
 import yaml
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple, Dict, Any, List
 from fastapi import FastAPI, Request, Response
@@ -22,11 +23,12 @@ from api_sentinel.diff_engine import DriftSeverity, DriftType
 from api_sentinel.openapi_parser import OpenAPIParser
 from api_sentinel.openapi_generator import generate_openapi_yaml, generate_openapi_spec
 from api_sentinel.html_report import generate_html_report, export_json_report
+from api_sentinel.spec_validator import validate_openapi_content, validate_openapi_spec
 
 from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
 from api_sentinel.database.session import init_db, AsyncSessionLocal
-from api_sentinel.database.models import ValidationReportRecord, DifferenceRecord
+from api_sentinel.database.models import ValidationReportRecord, DifferenceRecord, AggregatedDriftRecord
 from api_sentinel.config import settings
 
 
@@ -113,12 +115,228 @@ async def fetch_aggregate_report() -> AggregateReport:
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard_home(request: Request):
-    """Renders the dashboard home page with summary metrics and endpoint table."""
+    """Renders the dashboard home page with summary metrics, endpoint table, and top recurring drifts."""
     report = await fetch_aggregate_report()
+    top_drifts = []
+    async with AsyncSessionLocal() as session:
+        res = await session.execute(
+            select(AggregatedDriftRecord)
+            .order_by(AggregatedDriftRecord.occurrence_count.desc())
+            .limit(10)
+        )
+        top_drifts = res.scalars().all()
+
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={"report": report},
+        context={"report": report, "top_drifts": top_drifts},
+    )
+
+
+async def fetch_endpoint_catalog() -> List[Dict[str, Any]]:
+    """
+    Constructs a catalog merging OpenAPI specification endpoints with runtime traffic telemetry.
+    """
+    spec_path = get_active_spec_path()
+    spec_endpoints: Dict[Tuple[str, str], Dict[str, Any]] = {}
+
+    if os.path.exists(spec_path):
+        try:
+            parser = OpenAPIParser.from_file(spec_path)
+            for path_template, path_item in parser.paths.items():
+                if isinstance(path_item, dict):
+                    for method_key, op_data in path_item.items():
+                        m_upper = method_key.upper()
+                        if m_upper in {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}:
+                            key = (m_upper, path_template)
+                            spec_endpoints[key] = {
+                                "method": m_upper,
+                                "path": path_template,
+                                "summary": op_data.get("summary", "") if isinstance(op_data, dict) else "",
+                                "description": op_data.get("description", "") if isinstance(op_data, dict) else "",
+                                "is_documented": True,
+                                "parameters": op_data.get("parameters", []) if isinstance(op_data, dict) else [],
+                                "responses": list(op_data.get("responses", {}).keys()) if isinstance(op_data, dict) else [],
+                            }
+        except Exception:
+            pass
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(ValidationReportRecord)
+            .options(selectinload(ValidationReportRecord.differences))
+            .order_by(ValidationReportRecord.timestamp.desc())
+        )
+        records = result.scalars().all()
+
+    telemetry: Dict[Tuple[str, str], Dict[str, Any]] = defaultdict(lambda: {
+        "total_calls": 0,
+        "passed_calls": 0,
+        "warning_calls": 0,
+        "failed_calls": 0,
+        "last_checked": None,
+        "last_status": None,
+        "last_status_code": 200,
+        "latest_expected_schema": None,
+        "latest_actual_schema": None,
+        "violations": [],
+    })
+
+    for r in records:
+        key = (r.method.upper(), r.endpoint)
+        t = telemetry[key]
+        t["total_calls"] += 1
+        if r.validation_status == "PASSED":
+            t["passed_calls"] += 1
+        elif r.validation_status == "WARNING":
+            t["warning_calls"] += 1
+        else:
+            t["failed_calls"] += 1
+
+        if not t["last_checked"] and r.timestamp:
+            t["last_checked"] = r.timestamp.isoformat()
+            t["last_status"] = r.validation_status
+            t["last_status_code"] = r.status_code
+            t["latest_expected_schema"] = r.expected_schema
+            t["latest_actual_schema"] = r.actual_schema
+
+        for d in r.differences:
+            if len(t["violations"]) < 20:
+                t["violations"].append({
+                    "issue_type": d.issue_type,
+                    "severity": d.severity,
+                    "location": d.location,
+                    "message": d.message,
+                    "expected": d.expected,
+                    "actual": d.actual,
+                })
+
+    all_keys = set(spec_endpoints.keys()) | set(telemetry.keys())
+    catalog = []
+
+    for m_upper, path_str in sorted(all_keys, key=lambda x: (x[1], x[0])):
+        spec_info = spec_endpoints.get((m_upper, path_str), {
+            "method": m_upper,
+            "path": path_str,
+            "summary": "Undocumented endpoint observed at runtime",
+            "description": "",
+            "is_documented": False,
+            "parameters": [],
+            "responses": [],
+        })
+        t_info = telemetry.get((m_upper, path_str), {
+            "total_calls": 0,
+            "passed_calls": 0,
+            "warning_calls": 0,
+            "failed_calls": 0,
+            "last_checked": None,
+            "last_status": "UNTESTED",
+            "last_status_code": None,
+            "latest_expected_schema": None,
+            "latest_actual_schema": None,
+            "violations": [],
+        })
+
+        total = t_info["total_calls"]
+        if total == 0:
+            status = "UNTESTED"
+            pass_rate = 0
+        else:
+            pass_rate = round((t_info["passed_calls"] / total) * 100)
+            if t_info["failed_calls"] > 0:
+                status = "FAILED"
+            elif t_info["warning_calls"] > 0:
+                status = "WARNING"
+            else:
+                status = "PASSED"
+
+        catalog.append({
+            "method": m_upper,
+            "endpoint": path_str,
+            "summary": spec_info["summary"],
+            "description": spec_info["description"],
+            "is_documented": spec_info["is_documented"],
+            "status": status,
+            "total_calls": total,
+            "passed_calls": t_info["passed_calls"],
+            "warning_calls": t_info["warning_calls"],
+            "failed_calls": t_info["failed_calls"],
+            "pass_rate": pass_rate,
+            "last_checked": t_info["last_checked"],
+            "last_status_code": t_info["last_status_code"],
+            "parameters": spec_info["parameters"],
+            "responses": spec_info["responses"],
+            "violations": t_info["violations"],
+            "expected_schema": t_info["latest_expected_schema"],
+            "actual_schema": t_info["latest_actual_schema"],
+        })
+
+    return catalog
+
+
+@app.get("/endpoints", response_class=HTMLResponse)
+async def endpoints_explorer_page(request: Request):
+    """Renders the interactive Endpoints Explorer page with catalog and status metrics."""
+    catalog = await fetch_endpoint_catalog()
+    return templates.TemplateResponse(
+        request=request,
+        name="endpoints_explorer.html",
+        context={"catalog": catalog},
+    )
+
+
+@app.get("/api/endpoints")
+async def get_endpoints_catalog():
+    """Returns the endpoint catalog as JSON."""
+    catalog = await fetch_endpoint_catalog()
+    return JSONResponse(content={"endpoints": catalog, "total": len(catalog)})
+
+
+@app.get("/endpoint/explore", response_class=HTMLResponse)
+async def endpoint_explore(request: Request, method: str = "GET", endpoint: str = "/api/v1/users"):
+    """
+    Renders the endpoint-specific inspection view displaying spec schema,
+    historical drift violations, and runtime telemetry.
+    """
+    catalog = await fetch_endpoint_catalog()
+    target = None
+    for ep in catalog:
+        if ep["method"].upper() == method.upper() and ep["endpoint"] == endpoint:
+            target = ep
+            break
+
+    if target:
+        res = EndpointValidationResult(
+            endpoint=target["endpoint"],
+            method=target["method"],
+            status_code=target.get("last_status_code") or 200,
+            validation_status=ValidationStatus(target["status"]) if target["status"] in {"PASSED", "WARNING", "FAILED"} else ValidationStatus.PASSED,
+            severity=DriftSeverity.ERROR if target["status"] == "FAILED" else (DriftSeverity.WARNING if target["status"] == "WARNING" else None),
+            timestamp=target.get("last_checked") or datetime.now(timezone.utc).isoformat(),
+            expected_schema=target.get("expected_schema") or {},
+            actual_schema=target.get("actual_schema") or {},
+            differences=target.get("violations", []),
+        )
+    else:
+        res = EndpointValidationResult(
+            endpoint=endpoint,
+            method=method.upper(),
+            status_code=200,
+            validation_status=ValidationStatus.PASSED,
+            severity=None,
+        )
+
+    expected_json = json.dumps(res.expected_schema or {}, indent=2)
+    actual_json = json.dumps(res.actual_schema or {}, indent=2)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="endpoint_detail.html",
+        context={
+            "res": res,
+            "expected_schema_json": expected_json,
+            "actual_schema_json": actual_json,
+        },
     )
 
 
@@ -160,9 +378,49 @@ async def get_report_json():
     return JSONResponse(content=report.to_dict())
 
 
+@app.get("/api/drift/stats")
+async def get_drift_statistics():
+    """Returns aggregated drift statistics, including occurrence counts, timestamps, and recurring signatures."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(AggregatedDriftRecord)
+            .order_by(AggregatedDriftRecord.occurrence_count.desc(), AggregatedDriftRecord.last_seen.desc())
+            .limit(50)
+        )
+        records = result.scalars().all()
+
+        items = [
+            {
+                "id": r.id,
+                "endpoint": r.endpoint,
+                "method": r.method,
+                "issue_type": r.issue_type,
+                "location": r.location,
+                "message": r.message,
+                "severity": r.severity,
+                "occurrence_count": r.occurrence_count,
+                "first_seen": r.first_seen.isoformat() if r.first_seen else None,
+                "last_seen": r.last_seen.isoformat() if r.last_seen else None,
+                "sample_expected": r.sample_expected,
+                "sample_actual": r.sample_actual,
+            }
+            for r in records
+        ]
+
+        total_occurrences = sum(r.occurrence_count for r in records)
+        unique_endpoints = len(set(r.endpoint for r in records))
+
+        return {
+            "total_drift_occurrences": total_occurrences,
+            "distinct_drift_signatures": len(records),
+            "endpoints_affected": unique_endpoints,
+            "top_recurring_drifts": items,
+        }
+
+
 @app.post("/api/report/append")
 async def append_report_result(data: dict):
-    """Appends an individual EndpointValidationResult to the database."""
+    """Appends an individual EndpointValidationResult to the database and updates aggregated statistics."""
     if settings.selective_persistence:
         if data.get("validation_status") == ValidationStatus.PASSED.value:
             return {"status": "skipped", "reason": "selective persistence enabled, ignored PASSED"}
@@ -199,6 +457,49 @@ async def append_report_result(data: dict):
                 ))
             
             session.add(record)
+
+            # Update aggregated drift history & statistics
+            for diff in data.get("differences", []):
+                issue_type = diff.get("issue_type") or "DRIFT"
+                loc = diff.get("location") or "response_body"
+                msg = diff.get("message") or ""
+                sev = diff.get("severity") or "WARNING"
+                exp = str(diff.get("expected")) if diff.get("expected") is not None else None
+                act = str(diff.get("actual")) if diff.get("actual") is not None else None
+
+                agg_q = await session.execute(
+                    select(AggregatedDriftRecord).where(
+                        AggregatedDriftRecord.endpoint == data["endpoint"],
+                        AggregatedDriftRecord.method == data["method"].upper(),
+                        AggregatedDriftRecord.issue_type == issue_type,
+                        AggregatedDriftRecord.location == loc,
+                        AggregatedDriftRecord.message == msg,
+                    )
+                )
+                agg_record = agg_q.scalars().first()
+                if agg_record:
+                    agg_record.occurrence_count += 1
+                    agg_record.last_seen = ts
+                    agg_record.severity = sev
+                    if exp is not None:
+                        agg_record.sample_expected = exp
+                    if act is not None:
+                        agg_record.sample_actual = act
+                else:
+                    new_agg = AggregatedDriftRecord(
+                        endpoint=data["endpoint"],
+                        method=data["method"].upper(),
+                        issue_type=issue_type,
+                        location=loc,
+                        message=msg,
+                        severity=sev,
+                        occurrence_count=1,
+                        first_seen=ts,
+                        last_seen=ts,
+                        sample_expected=exp,
+                        sample_actual=act,
+                    )
+                    session.add(new_agg)
             
             # Retention policy cleanup
             cutoff_date = datetime.now(timezone.utc) - timedelta(days=settings.retention_days)
@@ -213,15 +514,17 @@ async def append_report_result(data: dict):
 
 @app.post("/api/report/clear")
 async def clear_report():
-    """Clears all validation results from the database."""
+    """Clears all validation results and aggregated drift statistics from the database."""
     try:
         async with AsyncSessionLocal() as session:
             await session.execute(delete(DifferenceRecord))
             await session.execute(delete(ValidationReportRecord))
+            await session.execute(delete(AggregatedDriftRecord))
             await session.commit()
         return {"status": "cleared", "total_endpoints": 0}
     except Exception as exc:
         return JSONResponse(status_code=400, content={"status": "error", "message": str(exc)})
+
 
 
 @app.get("/api/export/json")
@@ -260,76 +563,6 @@ def get_active_spec_path() -> str:
     return os.path.join(BASE_DIR, path)
 
 
-def validate_openapi_content(content_str: str) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
-    """
-    Validates an OpenAPI YAML or JSON specification string.
-    Reuses the existing OpenAPIParser without duplicate validation engines.
-
-    Returns
-    -------
-    tuple[bool, dict | None, str | None]
-        (is_valid, summary_dict, error_message)
-    """
-    if not content_str or not content_str.strip():
-        return False, None, "OpenAPI specification content cannot be empty."
-
-    # Parse YAML or JSON (yaml.safe_load parses both YAML and JSON)
-    try:
-        data = yaml.safe_load(content_str)
-    except Exception as exc:
-        return False, None, f"Invalid YAML/JSON syntax: {str(exc)}"
-
-    if not isinstance(data, dict):
-        return False, None, "OpenAPI specification must be a valid JSON/YAML object/dictionary."
-
-    # Validate version field (OpenAPI 3.x or Swagger 2.0)
-    version_str = data.get("openapi") or data.get("swagger")
-    if not version_str:
-        return False, None, "Missing required OpenAPI version field ('openapi' or 'swagger')."
-
-    # Validate info object
-    info = data.get("info")
-    if not isinstance(info, dict):
-        return False, None, "Missing or invalid 'info' section in OpenAPI specification."
-
-    title = str(info.get("title", "Untitled API"))
-    api_version = str(info.get("version", "1.0.0"))
-
-    # Validate paths object
-    paths = data.get("paths")
-    if not isinstance(paths, dict):
-        return False, None, "Missing or invalid 'paths' section in OpenAPI specification."
-
-    # Reuse OpenAPIParser to parse routes, parameters, and schema structures
-    try:
-        parser = OpenAPIParser.from_dict(data)
-        
-        endpoints_summary: List[Dict[str, Any]] = []
-        for path_template, path_item in parser.paths.items():
-            if isinstance(path_item, dict):
-                methods = [
-                    m.upper()
-                    for m in path_item.keys()
-                    if m.lower() in {"get", "post", "put", "delete", "patch", "head", "options", "trace"}
-                ]
-                endpoints_summary.append({
-                    "path": path_template,
-                    "methods": methods,
-                    "summary": path_item.get("summary", ""),
-                })
-
-        summary = {
-            "title": title,
-            "version": api_version,
-            "openapi_version": str(version_str),
-            "description": info.get("description", ""),
-            "paths_count": len(paths),
-            "endpoints": endpoints_summary,
-            "schemas_count": len(parser.components_schemas),
-        }
-        return True, summary, None
-    except Exception as exc:
-        return False, None, f"OpenAPI schema structure error: {str(exc)}"
 
 
 @app.get("/openapi-docs", response_class=HTMLResponse)

@@ -3,7 +3,7 @@ Tests for api_sentinel.inferencer — infer_json_schema function
 """
 
 import pytest
-from api_sentinel.inferencer import infer_json_schema, SchemaInferencer
+from api_sentinel.inferencer import infer_json_schema, infer_multi_json_schema, SchemaInferencer
 
 
 class TestInferJsonSchema:
@@ -150,3 +150,61 @@ class TestSchemaInferencerClass:
         schema = inferencer.infer_schema([1, 2, 3])
         assert schema["type"] == "array"
         assert "$schema" not in schema
+
+    def test_infer_multi_json_schema(self):
+        payloads = [
+            {"id": 1, "name": "Alice"},
+            {"id": 2, "name": "Bob", "bio": "Software developer"},
+            {"id": 3, "name": "Charlie", "email": "charlie@example.com"},
+        ]
+        schema = infer_multi_json_schema(payloads)
+        assert schema["type"] == "object"
+        assert "id" in schema["properties"]
+        assert "name" in schema["properties"]
+        assert "bio" in schema["properties"]
+        assert "email" in schema["properties"]
+        assert schema["properties"]["id"]["type"] == "integer"
+        assert schema["properties"]["name"]["type"] == "string"
+
+    def test_cumulative_observations_and_field_stats(self):
+        tracker = SchemaInferencer()
+        assert tracker.observation_count == 0
+        assert tracker.get_schema() == {}
+
+        # 1st observation
+        tracker.add_observation({"id": 101, "role": "admin", "bio": "Hello"})
+        # 2nd observation: bio is null, age is added
+        tracker.add_observation({"id": 102, "role": "user", "bio": None, "age": 25})
+        # 3rd observation: role as integer (mixed type), no bio
+        tracker.add_observation({"id": 103, "role": 123})
+
+        assert tracker.observation_count == 3
+        stats = tracker.get_field_stats()
+
+        # Check 'id'
+        id_stats = stats["$.id"]
+        assert id_stats["occurrence_count"] == 3
+        assert id_stats["occurrence_rate"] == 1.0
+        assert id_stats["types"] == {"integer": 3}
+        assert not id_stats["nullable"]
+
+        # Check 'bio'
+        bio_stats = stats["$.bio"]
+        assert bio_stats["occurrence_count"] == 2
+        assert bio_stats["occurrence_rate"] == round(2 / 3, 4)
+        assert bio_stats["nullable"] is True
+        assert bio_stats["null_count"] == 1
+
+        # Check 'role' (mixed types: string and integer)
+        role_stats = stats["$.role"]
+        assert role_stats["occurrence_count"] == 3
+        assert role_stats["types"]["string"] == 2
+        assert role_stats["types"]["integer"] == 1
+        assert role_stats["type_frequencies"]["string"] == round(2 / 3, 4)
+        assert role_stats["type_frequencies"]["integer"] == round(1 / 3, 4)
+
+        # Check reset
+        tracker.reset()
+        assert tracker.observation_count == 0
+        assert tracker.get_schema() == {}
+        assert tracker.get_field_stats() == {}

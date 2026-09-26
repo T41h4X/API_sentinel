@@ -3,7 +3,14 @@ Tests for api_sentinel.capture and middleware data collection
 """
 
 import pytest
-from api_sentinel.capture import detect_auth_type, sanitize_headers, safe_parse_body, get_content_type
+from api_sentinel.capture import (
+    detect_auth_type,
+    sanitize_headers,
+    sanitize_query_params,
+    sanitize_body,
+    safe_parse_body,
+    get_content_type,
+)
 from api_sentinel.runtime_data import RuntimeData
 
 
@@ -110,3 +117,43 @@ class TestRuntimeDataCollection:
         assert dict_data["method"] == "POST"
         assert dict_data["authentication_type"] == "Bearer Token"
         assert "timestamp" in dict_data
+
+    def test_sanitize_query_params(self):
+        """Ensure sensitive query parameters like token and api_key are redacted."""
+        params = {
+            "page": "1",
+            "token": "my-secret-token",
+            "api_key": "12345",
+            "sort": "desc"
+        }
+        sanitized = sanitize_query_params(params)
+        assert sanitized["page"] == "1"
+        assert sanitized["sort"] == "desc"
+        assert sanitized["token"] == "[REDACTED]"
+        assert sanitized["api_key"] == "[REDACTED]"
+
+    def test_sanitize_body_nested(self):
+        """Ensure nested dictionary and list fields with sensitive keys are redacted."""
+        body = {
+            "user": {
+                "name": "Bob",
+                "password": "supersecretpassword",
+                "nested": {
+                    "token": "nested-token",
+                    "safe_val": 42
+                }
+            },
+            "keys": [
+                {"secret": "hidden1", "label": "public1"},
+                {"secret": "hidden2", "label": "public2"}
+            ]
+        }
+        sanitized = sanitize_body(body)
+        assert sanitized["user"]["name"] == "Bob"
+        assert sanitized["user"]["password"] == "[REDACTED]"
+        assert sanitized["user"]["nested"]["token"] == "[REDACTED]"
+        assert sanitized["user"]["nested"]["safe_val"] == 42
+        assert sanitized["keys"][0]["secret"] == "[REDACTED]"
+        assert sanitized["keys"][0]["label"] == "public1"
+        assert sanitized["keys"][1]["secret"] == "[REDACTED]"
+

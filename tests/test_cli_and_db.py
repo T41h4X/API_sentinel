@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from api_sentinel import __version__
-from api_sentinel.cli import main, run_validate, run_dashboard
+from api_sentinel.cli import main, run_validate, run_dashboard, run_check
 from api_sentinel.config import Settings
 from api_sentinel.database.session import init_db, AsyncSessionLocal
 from api_sentinel.database.models import ValidationReportRecord, DifferenceRecord
@@ -63,6 +63,87 @@ class TestCLI:
             main()
         captured = capsys.readouterr()
         assert "usage:" in captured.out or "API Sentinel" in captured.out
+
+    def test_check_command_spec_only_success(self, capsys):
+        spec_path = os.path.join(os.path.dirname(__file__), "..", "openapi.yaml")
+        with pytest.raises(SystemExit) as exc_info:
+            with patch.object(sys, "argv", ["api-sentinel", "check", "--spec", spec_path]):
+                main()
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert "valid with" in captured.out
+        assert "Specification check passed" in captured.out
+
+    def test_check_command_with_passing_traffic(self, tmp_path, capsys):
+        import json
+        spec_path = os.path.join(os.path.dirname(__file__), "..", "openapi.yaml")
+        traffic_file = tmp_path / "traffic.json"
+        traffic_data = [
+            {
+                "method": "GET",
+                "path": "/api/v1/users",
+                "status_code": 200,
+                "response_body": [
+                    {"id": 1, "name": "Alice", "email": "alice@example.com"}
+                ]
+            }
+        ]
+        traffic_file.write_text(json.dumps(traffic_data))
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_check(spec_path=spec_path, traffic_path=str(traffic_file), fail_on="error")
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert "CONTRACT CHECK" in captured.out
+        assert "PASSED" in captured.out
+
+    def test_check_command_with_failing_traffic(self, tmp_path, capsys):
+        import json
+        spec_path = os.path.join(os.path.dirname(__file__), "..", "openapi.yaml")
+        traffic_file = tmp_path / "failing_traffic.json"
+        # Missing required name and email
+        traffic_data = [
+            {
+                "method": "GET",
+                "path": "/api/v1/users",
+                "status_code": 200,
+                "response_body": [
+                    {"id": 1}
+                ]
+            }
+        ]
+        traffic_file.write_text(json.dumps(traffic_data))
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_check(spec_path=spec_path, traffic_path=str(traffic_file), fail_on="error")
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "FAILED" in captured.out
+
+    def test_check_command_json_output(self, tmp_path, capsys):
+        import json
+        spec_path = os.path.join(os.path.dirname(__file__), "..", "openapi.yaml")
+        traffic_file = tmp_path / "traffic.json"
+        traffic_data = [
+            {
+                "method": "GET",
+                "path": "/api/v1/users",
+                "status_code": 200,
+                "response_body": [
+                    {"id": 1, "name": "Bob", "email": "bob@example.com"}
+                ]
+            }
+        ]
+        traffic_file.write_text(json.dumps(traffic_data))
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_check(spec_path=spec_path, traffic_path=str(traffic_file), json_output=True)
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert data["status"] == "PASSED"
+        assert data["records_analyzed"] == 1
+
 
 
 # ---------------------------------------------------------------------------

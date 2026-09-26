@@ -288,3 +288,96 @@ def test_api_report_contains_timeline():
     assert len(data["timeline"]["bars"]) == 12
 
 
+def test_drift_statistics_endpoint_and_aggregation():
+    """Test that recurring drift issues are aggregated with occurrence counts, timestamps, and stats API."""
+    client = TestClient(app)
+    client.post("/api/report/clear")
+
+    drift_payload = {
+        "endpoint": "/api/v1/users",
+        "method": "POST",
+        "status_code": 201,
+        "validation_status": "FAILED",
+        "severity": "ERROR",
+        "differences": [
+            {
+                "issue_type": "MISSING_REQUIRED_FIELD",
+                "severity": "ERROR",
+                "location": "request_body",
+                "message": "Missing required field 'email'",
+                "expected": "email",
+                "actual": None,
+            },
+            {
+                "issue_type": "TYPE_MISMATCH",
+                "severity": "ERROR",
+                "location": "request_body",
+                "message": "Type mismatch at $.age",
+                "expected": "integer",
+                "actual": "string",
+            }
+        ]
+    }
+
+    # Post first occurrence
+    resp1 = client.post("/api/report/append", json=drift_payload)
+    assert resp1.status_code == 200
+
+    # Post second occurrence of the same issue
+    resp2 = client.post("/api/report/append", json=drift_payload)
+    assert resp2.status_code == 200
+
+    # Fetch drift statistics
+    stats_resp = client.get("/api/drift/stats")
+    assert stats_resp.status_code == 200
+    stats = stats_resp.json()
+
+    assert stats["total_drift_occurrences"] == 4  # 2 diffs x 2 posts
+    assert stats["distinct_drift_signatures"] == 2
+    assert stats["endpoints_affected"] == 1
+
+    top_drifts = stats["top_recurring_drifts"]
+    assert len(top_drifts) == 2
+    for item in top_drifts:
+        assert item["occurrence_count"] == 2
+        assert item["first_seen"] is not None
+        assert item["last_seen"] is not None
+        assert item["endpoint"] == "/api/v1/users"
+
+    # Test clear
+    clear_resp = client.post("/api/report/clear")
+    assert clear_resp.status_code == 200
+
+    stats_cleared = client.get("/api/drift/stats").json()
+    assert stats_cleared["total_drift_occurrences"] == 0
+    assert stats_cleared["distinct_drift_signatures"] == 0
+
+
+def test_endpoints_explorer_catalog_and_view():
+    """Test that Endpoints Explorer catalog page and JSON API return endpoints and status."""
+    client = TestClient(app)
+
+    # Test /api/endpoints JSON endpoint
+    api_resp = client.get("/api/endpoints")
+    assert api_resp.status_code == 200
+    data = api_resp.json()
+    assert "endpoints" in data
+    assert data["total"] > 0
+    endpoints = data["endpoints"]
+    paths = [ep["endpoint"] for ep in endpoints]
+    assert "/api/v1/users" in paths
+
+    # Test /endpoints HTML page
+    html_resp = client.get("/endpoints")
+    assert html_resp.status_code == 200
+    assert "Endpoints Explorer" in html_resp.text
+    assert "/api/v1/users" in html_resp.text
+
+    # Test /endpoint/explore endpoint-specific view
+    explore_resp = client.get("/endpoint/explore?method=GET&endpoint=/api/v1/users")
+    assert explore_resp.status_code == 200
+    assert "Endpoint Detail" in explore_resp.text or "/api/v1/users" in explore_resp.text
+
+
+
+

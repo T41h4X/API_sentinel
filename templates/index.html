@@ -188,6 +188,12 @@
         </a>
       </li>
       <li>
+        <a class="flex items-center gap-3 p-2 text-on-surface-variant hover:text-on-surface hover:bg-surface-variant rounded-lg transition-all font-body-sm text-body-sm" href="/endpoints">
+          <span class="material-symbols-outlined">explore</span>
+          <span class="font-body-sm text-body-sm">Endpoints Explorer</span>
+        </a>
+      </li>
+      <li>
         <a class="flex items-center gap-3 p-2 text-on-surface-variant hover:text-on-surface hover:bg-surface-variant rounded-lg transition-all font-body-sm text-body-sm" href="/openapi-docs">
           <span class="material-symbols-outlined">menu_book</span>
           <span class="font-body-sm text-body-sm">OpenAPI Docs</span>
@@ -338,6 +344,55 @@
           </div>
         </div>
       </div>
+
+      <!-- Top Recurring Drift Issues Card -->
+      {% if top_drifts %}
+      <div class="widget-card mb-lg">
+        <div class="flex justify-between items-center mb-md">
+          <div class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-primary text-xl">history</span>
+            <h2 class="font-headline-sm text-headline-sm text-on-surface">Recurring Schema Drift History</h2>
+          </div>
+          <span class="text-xs text-on-surface-variant font-code-md">Aggregated by violation signature</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="text-on-surface-variant font-label-caps text-label-caps border-b border-outline-variant">
+                <th class="pb-2 font-normal pr-4">Occurrences</th>
+                <th class="pb-2 font-normal pr-4">Severity</th>
+                <th class="pb-2 font-normal pr-4">Type</th>
+                <th class="pb-2 font-normal pr-4">Endpoint</th>
+                <th class="pb-2 font-normal pr-4">Details</th>
+                <th class="pb-2 font-normal pr-4">First Seen</th>
+                <th class="pb-2 font-normal">Last Seen</th>
+              </tr>
+            </thead>
+            <tbody class="text-xs font-code-md">
+              {% for d in top_drifts %}
+              <tr class="hover:bg-surface-container transition-colors border-b border-outline-variant/30">
+                <td class="py-2.5 pr-4 font-bold text-primary">{{ d.occurrence_count }}x</td>
+                <td class="py-2.5 pr-4">
+                  {% if d.severity == 'ERROR' %}
+                  <span class="bg-error-container text-on-error-container px-2 py-0.5 rounded text-[11px] font-bold">ERROR</span>
+                  {% elif d.severity == 'WARNING' %}
+                  <span class="bg-tertiary-container text-on-tertiary-container px-2 py-0.5 rounded text-[11px] font-bold">WARNING</span>
+                  {% else %}
+                  <span class="bg-surface-container-high text-on-surface-variant px-2 py-0.5 rounded text-[11px] font-bold">INFO</span>
+                  {% endif %}
+                </td>
+                <td class="py-2.5 pr-4 font-bold text-on-surface">{{ d.issue_type }}</td>
+                <td class="py-2.5 pr-4"><span class="bg-primary-container text-on-primary-container px-1.5 py-0.5 rounded mr-1 text-[10px]">{{ d.method }}</span>{{ d.endpoint }}</td>
+                <td class="py-2.5 pr-4 text-on-surface-variant truncate max-w-xs" title="{{ d.message }}">{{ d.message }}</td>
+                <td class="py-2.5 pr-4 text-on-surface-variant text-[11px]">{{ d.first_seen.strftime('%Y-%m-%d %H:%M:%S') if d.first_seen else '—' }}</td>
+                <td class="py-2.5 text-on-surface-variant text-[11px]">{{ d.last_seen.strftime('%Y-%m-%d %H:%M:%S') if d.last_seen else '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
 
       <!-- Endpoint Table Card -->
       <div class="widget-card">
