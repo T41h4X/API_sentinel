@@ -371,6 +371,50 @@
         if (elEnd && timeline.end_label) elEnd.textContent = timeline.end_label;
     }
 
+    // Fetch and dynamically update recurring drift history
+    async function fetchDriftStats() {
+        try {
+            const res = await fetch("/api/drift/stats", { cache: "no-store" });
+            if (!res.ok) return;
+            const data = await res.json();
+            const tbody = document.getElementById("recurring-drift-rows");
+            if (!tbody) return;
+
+            const items = data.top_recurring_drifts || [];
+            if (items.length === 0) {
+                tbody.innerHTML = `<tr id="no-drifts-row"><td colspan="7" class="py-4 text-center text-on-surface-variant font-body-sm">No recurring schema drifts recorded yet. Run <code>python push_to_dashboard.py</code> to generate drift scenarios.</td></tr>`;
+                return;
+            }
+
+            let html = "";
+            items.forEach(d => {
+                let sevBadge = `<span class="bg-surface-container-high text-on-surface-variant px-2 py-0.5 rounded text-[11px] font-bold">INFO</span>`;
+                if (d.severity === "ERROR") {
+                    sevBadge = `<span class="bg-error-container text-on-error-container px-2 py-0.5 rounded text-[11px] font-bold">ERROR</span>`;
+                } else if (d.severity === "WARNING") {
+                    sevBadge = `<span class="bg-tertiary-container text-on-tertiary-container px-2 py-0.5 rounded text-[11px] font-bold">WARNING</span>`;
+                }
+
+                const firstSeen = d.first_seen ? d.first_seen.replace("T", " ").substring(0, 19) : "—";
+                const lastSeen = d.last_seen ? d.last_seen.replace("T", " ").substring(0, 19) : "—";
+
+                html += `
+                <tr class="hover:bg-surface-container transition-colors border-b border-outline-variant/30">
+                  <td class="py-2.5 pr-4 font-bold text-primary">${escapeHtml(d.occurrence_count)}x</td>
+                  <td class="py-2.5 pr-4">${sevBadge}</td>
+                  <td class="py-2.5 pr-4 font-bold text-on-surface">${escapeHtml(d.issue_type)}</td>
+                  <td class="py-2.5 pr-4"><span class="bg-primary-container text-on-primary-container px-1.5 py-0.5 rounded mr-1 text-[10px]">${escapeHtml(d.method)}</span>${escapeHtml(d.endpoint)}</td>
+                  <td class="py-2.5 pr-4 text-on-surface-variant truncate max-w-xs" title="${escapeHtml(d.message)}">${escapeHtml(d.message)}</td>
+                  <td class="py-2.5 pr-4 text-on-surface-variant text-[11px]">${firstSeen}</td>
+                  <td class="py-2.5 text-on-surface-variant text-[11px]">${lastSeen}</td>
+                </tr>`;
+            });
+            tbody.innerHTML = html;
+        } catch (err) {
+            console.debug("Error updating drift stats:", err);
+        }
+    }
+
     // Fetch report from server
     async function fetchReport(force = false) {
         try {
@@ -382,6 +426,7 @@
                 const data = JSON.parse(text);
                 updateDashboardUI(data);
             }
+            await fetchDriftStats();
         } catch (err) {
             // Silently handle transient connection loss
             console.debug("Live sync polling error:", err);
@@ -393,6 +438,7 @@
         if (isPolling) return;
         isPolling = true;
         fetchReport(true);
+        fetchDriftStats();
         pollIntervalId = setInterval(() => {
             fetchReport(false);
         }, 1500);
